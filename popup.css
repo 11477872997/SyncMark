@@ -542,20 +542,26 @@ input:checked + .toggle-slider:before {
   color: white;
   border: none;
   border-radius: 6px;
-  padding: 6px 8px;
-  font-size: 11px;
+  padding: 8px 12px;
+  min-height: 34px;
+  font-size: 12px;
   font-weight: 500;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 8px;
+  line-height: 1;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.15s;
   white-space: nowrap;
 }
 
 .sync-btn svg {
+  display: block;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
+  vertical-align: middle;
 }
 
 .sync-btn.upload {
