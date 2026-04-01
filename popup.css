@@ -152,7 +152,7 @@ body {
   width: 36px;
   height: 36px;
   border-radius: 6px;
-  object-fit: cover;
+  object-fit: fill;
   background: #f8f8f8;
   flex-shrink: 0;
   border: 1px solid rgba(0,0,0,0.06);
