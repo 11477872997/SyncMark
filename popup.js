@@ -294,56 +294,103 @@ async function loadConfigSettings() {
 // 加载用户信息
 async function loadUserInfo() {
   try {
+    // 加载两端的 token 与缓存的用户信息（分别保存）
     const config = await chrome.storage.local.get([
-      'syncPlatform',
-      'githubToken',
-      'giteeToken',
-      'userInfo'
+      'githubToken', 'giteeToken', 'githubUserInfo', 'giteeUserInfo'
     ]);
 
-    const userNameEl = document.getElementById('userName');
-    const userEmailEl = document.getElementById('userEmail');
-
-    // 如果已有缓存的用户信息，直接显示
-    if (config.userInfo) {
-      userNameEl.textContent = config.userInfo.name || '未登录';
-      userEmailEl.textContent = config.userInfo.email || '';
-      return;
-    }
-
-    // 优先使用 GitHub，如果没有则使用 Gitee
-    let token = config.githubToken;
-    let platform = 'github';
-
-    if (!token && config.giteeToken) {
-      token = config.giteeToken;
-      platform = 'gitee';
-    }
-
-    if (!token) {
-      userNameEl.textContent = '未登录';
-      userEmailEl.textContent = '请先配置 Token';
-      return;
-    }
-
-    // 获取用户信息
-    let userInfo;
-    if (platform === 'github') {
-      userInfo = await fetchGitHubUserInfo(token);
+    // GitHub 显示（含头像）
+    const ghNameEl = document.getElementById('githubUserName');
+    const ghEmailEl = document.getElementById('githubUserEmail');
+    const ghAvatar = document.getElementById('githubAvatar');
+  const ghLogoutBtn = document.getElementById('logoutGithubBtn');
+  const ghConfigBtn = document.getElementById('configGithubBtn');
+    if (config.githubUserInfo) {
+      const u = config.githubUserInfo;
+      ghNameEl.textContent = u.name || u.login || 'GitHub 用户';
+      ghEmailEl.textContent = u.email || '';
+      ghAvatar.src = u.avatar_url || u.avatar || 'icons/icon48.png';
+    } else if (config.githubToken) {
+      // 异步获取并缓存（不阻塞 UI）
+      ghNameEl.textContent = '加载中...';
+      ghAvatar.src = 'icons/icon48.png';
+      (async () => {
+        try {
+          const u = await fetchGitHubUserInfo(config.githubToken);
+          await chrome.storage.local.set({ githubUserInfo: u });
+          ghNameEl.textContent = u.name || u.login || 'GitHub 用户';
+          ghEmailEl.textContent = u.email || '';
+          ghAvatar.src = u.avatar_url || u.avatar || 'icons/icon48.png';
+        } catch (e) {
+          console.warn('获取 GitHub 用户信息失败:', e);
+          ghNameEl.textContent = '登录但无法获取信息';
+          ghEmailEl.textContent = '';
+          ghAvatar.src = 'icons/icon48.png';
+        }
+      })();
     } else {
-      userInfo = await fetchGiteeUserInfo(token);
+      ghNameEl.textContent = '未登录';
+      ghEmailEl.textContent = '';
+      ghAvatar.src = 'icons/icon48.png';
     }
 
-    // 保存用户信息
-    await chrome.storage.local.set({ userInfo });
+    // 根据 token 显示配置或退出按钮
+    if (config.githubToken) {
+      if (ghLogoutBtn) ghLogoutBtn.style.display = 'inline-block';
+      if (ghConfigBtn) ghConfigBtn.style.display = 'none';
+    } else {
+      if (ghLogoutBtn) ghLogoutBtn.style.display = 'none';
+      if (ghConfigBtn) ghConfigBtn.style.display = 'inline-block';
+    }
 
-    // 显示用户信息
-    userNameEl.textContent = userInfo.name || userInfo.login || '未知用户';
-    userEmailEl.textContent = userInfo.email || '';
+    // Gitee 显示
+    const geNameEl = document.getElementById('giteeUserName');
+    const geEmailEl = document.getElementById('giteeUserEmail');
+    const geAvatar = document.getElementById('giteeAvatar');
+  const geLogoutBtn = document.getElementById('logoutGiteeBtn');
+  const geConfigBtn = document.getElementById('configGiteeBtn');
+    if (config.giteeUserInfo) {
+      const u = config.giteeUserInfo;
+      geNameEl.textContent = u.name || u.login || 'Gitee 用户';
+      geEmailEl.textContent = u.email || '';
+      geAvatar.src = u.avatar || u.avatar_url || 'icons/icon48.png';
+    } else if (config.giteeToken) {
+      geNameEl.textContent = '加载中...';
+      geAvatar.src = 'icons/icon48.png';
+      (async () => {
+        try {
+          const u = await fetchGiteeUserInfo(config.giteeToken);
+          await chrome.storage.local.set({ giteeUserInfo: u });
+          geNameEl.textContent = u.name || u.login || 'Gitee 用户';
+          geEmailEl.textContent = u.email || '';
+          geAvatar.src = u.avatar || u.avatar_url || 'icons/icon48.png';
+        } catch (e) {
+          console.warn('获取 Gitee 用户信息失败:', e);
+          geNameEl.textContent = '登录但无法获取信息';
+          geEmailEl.textContent = '';
+          geAvatar.src = 'icons/icon48.png';
+        }
+      })();
+    } else {
+      geNameEl.textContent = '未登录';
+      geEmailEl.textContent = '';
+      geAvatar.src = 'icons/icon48.png';
+    }
+
+    if (config.giteeToken) {
+      if (geLogoutBtn) geLogoutBtn.style.display = 'inline-block';
+      if (geConfigBtn) geConfigBtn.style.display = 'none';
+    } else {
+      if (geLogoutBtn) geLogoutBtn.style.display = 'none';
+      if (geConfigBtn) geConfigBtn.style.display = 'inline-block';
+    }
   } catch (error) {
     console.error('加载用户信息失败:', error);
-    document.getElementById('userName').textContent = '未登录';
-    document.getElementById('userEmail').textContent = '';
+    // 回退显示
+    try { document.getElementById('githubUserName').textContent = '未登录'; } catch (e) {}
+    try { document.getElementById('githubUserEmail').textContent = ''; } catch (e) {}
+    try { document.getElementById('giteeUserName').textContent = '未登录'; } catch (e) {}
+    try { document.getElementById('giteeUserEmail').textContent = ''; } catch (e) {}
   }
 }
 
@@ -599,10 +646,44 @@ function setupEventListeners() {
   document.getElementById('userAvatar').addEventListener('click', toggleUserDropdown);
 
   // 退出登录按钮
-  document.getElementById('logoutBtn').addEventListener('click', handleLogout);
+  // 旧的全局退出按钮已替换，支持按平台退出
+  const logoutGithubBtn = document.getElementById('logoutGithubBtn');
+  if (logoutGithubBtn) logoutGithubBtn.addEventListener('click', () => handleLogoutPlatform('github'));
+  const logoutGiteeBtn = document.getElementById('logoutGiteeBtn');
+  if (logoutGiteeBtn) logoutGiteeBtn.addEventListener('click', () => handleLogoutPlatform('gitee'));
+
+  // 配置 Token 按钮：打开侧边栏并聚焦对应输入框
+  const configGithubBtn = document.getElementById('configGithubBtn');
+  if (configGithubBtn) configGithubBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openConfigSidebar();
+    setTimeout(() => {
+      const el = document.getElementById('githubTokenInput');
+      if (el) { el.focus(); el.select(); }
+    }, 200);
+  });
+
+  const configGiteeBtn = document.getElementById('configGiteeBtn');
+  if (configGiteeBtn) configGiteeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openConfigSidebar();
+    setTimeout(() => {
+      const el = document.getElementById('giteeTokenInput');
+      if (el) { el.focus(); el.select(); }
+    }, 200);
+  });
 
   // 设置按钮
   document.getElementById('settingsBtn').addEventListener('click', openConfigSidebar);
+
+  // 项目仓库按钮：在新标签页打开 GitHub 仓库
+  const repoBtn = document.getElementById('repoBtn');
+  if (repoBtn) {
+    repoBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      chrome.tabs.create({ url: 'https://github.com/11477872997/SyncMark' });
+    });
+  }
 
   // 更多按钮
   document.getElementById('moreBtn').addEventListener('click', toggleMoreDropdown);
@@ -685,6 +766,33 @@ async function handleLogout() {
       console.error('退出登录失败:', error);
       await showAlert('退出失败: ' + error.message, '错误', 'error');
     }
+  }
+}
+
+// 平台退出（只清除对应平台的数据）
+async function handleLogoutPlatform(platform) {
+  const platformName = platform === 'github' ? 'GitHub' : 'Gitee';
+  const confirmed = await showConfirm(`确定要退出 ${platformName} 吗？这将清除该平台的 Token、用户信息和远程备份配置。`, '退出登录', {
+    type: 'warning', danger: true, confirmText: '退出', cancelText: '取消'
+  });
+
+  if (!confirmed) return;
+
+  try {
+    if (platform === 'github') {
+      await chrome.storage.local.remove(['githubToken', 'githubGistId', 'githubRemoteCount', 'githubUserInfo']);
+    } else {
+      await chrome.storage.local.remove(['giteeToken', 'giteeGistId', 'giteeRemoteCount', 'giteeUserInfo']);
+    }
+
+    // 更新 UI
+    await loadRemoteBookmarkCount();
+    await loadUserInfo();
+
+    await showAlert(`${platformName} 已退出登录`, '成功', 'success');
+  } catch (error) {
+    console.error(`退出 ${platformName} 失败:`, error);
+    await showAlert(`退出失败: ${error && error.message ? error.message : String(error)}`, '错误', 'error');
   }
 }
 
