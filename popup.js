@@ -487,12 +487,16 @@ async function handleSaveConfig() {
 
     await chrome.storage.local.set(config);
 
-    // 立即反馈：已保存（后续耗时的远程检查在后台异步执行，不阻塞 UI）
+    // 立即反馈：已保存（后续耗时的远程检查在后台异步执行）
     saveStatusEl.textContent = '已保存';
-    // 非阻塞地弹出提示（不必等待后台检查完成）
+    // 非阻塞地弹出提示（本地保存已完成）
     showAlert('配置已保存！', '成功', 'success');
 
-    // 在后台执行耗时任务（查找 Gist / 获取用户信息 / 更新远程计数），不阻塞用户操作
+    // 如果后续需要进行网络验证/检查，则显示全屏加载遮罩，直到后台验证完成
+    const needBackgroundChecks = !!(githubToken || giteeToken);
+    if (needBackgroundChecks) showGlobalLoading('正在验证配置，请稍候...');
+
+    // 在后台执行耗时任务（查找 Gist / 获取用户信息 / 更新远程计数）
     (async () => {
       try {
         // 查找已存在的 Gist（GitHub）
@@ -528,6 +532,9 @@ async function handleSaveConfig() {
       } catch (e) {
         console.warn('后台检查执行失败:', e);
       } finally {
+        // 隐藏全局加载遮罩（如果显示）
+        if (needBackgroundChecks) hideGlobalLoading();
+
         // 稍微延迟恢复按钮和清理状态，让用户看到“已保存”的提示
         setTimeout(() => {
           if (saveStatusEl) saveStatusEl.textContent = '';
@@ -1185,4 +1192,28 @@ function getIconByType(type) {
     error: '✕'
   };
   return icons[type] || icons.info;
+}
+
+// 显示全局加载遮罩
+function showGlobalLoading(message) {
+  try {
+    const overlay = document.getElementById('globalLoading');
+    if (!overlay) return;
+    const textEl = overlay.querySelector('.global-loading-text');
+    if (textEl && message) textEl.textContent = message;
+    overlay.style.display = 'flex';
+  } catch (e) {
+    console.warn('无法显示全局加载遮罩:', e);
+  }
+}
+
+// 隐藏全局加载遮罩
+function hideGlobalLoading() {
+  try {
+    const overlay = document.getElementById('globalLoading');
+    if (!overlay) return;
+    overlay.style.display = 'none';
+  } catch (e) {
+    console.warn('无法隐藏全局加载遮罩:', e);
+  }
 }
