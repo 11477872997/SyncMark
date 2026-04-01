@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "SyncMark",
+    "description": "扩展名"
+  },
+  "extDesc": {
+    "message": "同步书签到 GitHub Gist 或 Gitee，跨设备管理您的书签",
+    "description": "扩展描述"
+  }
+}

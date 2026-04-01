@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "SyncMark",
+  "name": "__MSG_extName__",
   "version": "1.0.1",
-  "description": "同步书签到 GitHub Gist 或 Gitee，跨设备管理您的书签",
+  "default_locale": "en",
+  "description": "__MSG_extDesc__",
   "permissions": [
     "bookmarks",
     "storage",

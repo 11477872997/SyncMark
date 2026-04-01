@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "SyncMark",
+    "description": "Extension name"
+  },
+  "extDesc": {
+    "message": "Sync bookmarks to GitHub Gist or Gitee for cross-device bookmark management",
+    "description": "Extension description"
+  }
+}
