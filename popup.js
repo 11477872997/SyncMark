@@ -395,75 +395,115 @@ function handleQuickOAuth(platform) {
 
 // 保存配置
 async function handleSaveConfig() {
+  // 立即给出 UI 反馈：禁用按钮并显示“保存中”状态，避免用户卡住
+  const saveBtn = document.getElementById('saveConfigBtn');
+  const originalBtnText = saveBtn ? saveBtn.textContent : '';
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = '保存中...';
+    saveBtn.classList.add('loading');
+  }
+
+  // 在按钮旁显示简短的保存状态信息（如果不存在则创建）
+  let saveStatusEl = document.getElementById('saveStatus');
+  if (!saveStatusEl) {
+    saveStatusEl = document.createElement('span');
+    saveStatusEl.id = 'saveStatus';
+    saveStatusEl.className = 'save-status';
+    if (saveBtn && saveBtn.parentNode) {
+      saveBtn.parentNode.insertBefore(saveStatusEl, saveBtn.nextSibling);
+    }
+  }
+  saveStatusEl.textContent = '保存中...';
+
   try {
     const githubToken = document.getElementById('githubTokenInput').value.trim();
     const giteeToken = document.getElementById('giteeTokenInput').value.trim();
     const syncInterval = parseInt(document.getElementById('syncIntervalSelect').value);
 
     if (!githubToken && !giteeToken) {
+      // 恢复按钮状态
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = originalBtnText;
+        saveBtn.classList.remove('loading');
+      }
+      saveStatusEl.textContent = '';
       await showAlert('请至少配置一个平台的 Token', '提示', 'warning');
       return;
     }
 
-    // 保存配置
-    const config = {
-      syncInterval: syncInterval
-    };
-
-    if (githubToken) {
-      config.githubToken = githubToken;
-    }
-
-    if (giteeToken) {
-      config.giteeToken = giteeToken;
-    }
+    // 保存配置到本地（这一步较快，可立即反馈成功）
+    const config = { syncInterval: syncInterval };
+    if (githubToken) config.githubToken = githubToken;
+    if (giteeToken) config.giteeToken = giteeToken;
 
     await chrome.storage.local.set(config);
 
-    // 查找已存在的 Gist（GitHub）
-    if (githubToken) {
+    // 立即反馈：已保存（后续耗时的远程检查在后台异步执行，不阻塞 UI）
+    saveStatusEl.textContent = '已保存';
+    // 非阻塞地弹出提示（不必等待后台检查完成）
+    showAlert('配置已保存！', '成功', 'success');
+
+    // 在后台执行耗时任务（查找 Gist / 获取用户信息 / 更新远程计数），不阻塞用户操作
+    (async () => {
       try {
-        const response = await chrome.runtime.sendMessage({
-          action: 'findExistingGist',
-          platform: 'github'
-        });
-        if (response.success && response.gistId) {
-          console.log('找到 GitHub Gist:', response.gistId, '书签数量:', response.count);
-          await fetchRemoteBookmarkCount('github');
+        // 查找已存在的 Gist（GitHub）
+        if (githubToken) {
+          try {
+            const response = await chrome.runtime.sendMessage({ action: 'findExistingGist', platform: 'github' });
+            if (response && response.success && response.gistId) {
+              console.log('找到 GitHub Gist:', response.gistId, '书签数量:', response.count);
+              await fetchRemoteBookmarkCount('github');
+            }
+          } catch (error) {
+            console.warn('查找 GitHub Gist 失败:', error);
+          }
         }
-      } catch (error) {
-        console.warn('查找 GitHub Gist 失败:', error);
-      }
-    }
 
-    // 查找已存在的 Gist（Gitee）
-    if (giteeToken) {
-      try {
-        const response = await chrome.runtime.sendMessage({
-          action: 'findExistingGist',
-          platform: 'gitee'
-        });
-        if (response.success && response.gistId) {
-          console.log('找到 Gitee Gist:', response.gistId, '书签数量:', response.count);
-          await fetchRemoteBookmarkCount('gitee');
+        // 查找已存在的 Gist（Gitee）
+        if (giteeToken) {
+          try {
+            const response = await chrome.runtime.sendMessage({ action: 'findExistingGist', platform: 'gitee' });
+            if (response && response.success && response.gistId) {
+              console.log('找到 Gitee Gist:', response.gistId, '书签数量:', response.count);
+              await fetchRemoteBookmarkCount('gitee');
+            }
+          } catch (error) {
+            console.warn('查找 Gitee Gist 失败:', error);
+          }
         }
-      } catch (error) {
-        console.warn('查找 Gitee Gist 失败:', error);
+
+        // 更新界面信息（可能包含网络请求）
+        await loadSyncStatus();
+        await loadUserInfo();
+        await loadRemoteBookmarkCount();
+      } catch (e) {
+        console.warn('后台检查执行失败:', e);
+      } finally {
+        // 稍微延迟恢复按钮和清理状态，让用户看到“已保存”的提示
+        setTimeout(() => {
+          if (saveStatusEl) saveStatusEl.textContent = '';
+          if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = originalBtnText;
+            saveBtn.classList.remove('loading');
+          }
+        }, 1200);
       }
-    }
+    })();
 
-    // 更新显示
-    await loadSyncStatus();
-    await loadUserInfo();
-    await loadRemoteBookmarkCount();
-
-    await showAlert('配置已保存！', '成功', 'success');
-
-    // 关闭配置侧边栏
-    closeConfigSidebar();
+    // 关闭配置侧边栏（给用户短暂时间看到保存状态）
+    setTimeout(closeConfigSidebar, 600);
   } catch (error) {
     console.error('保存配置失败:', error);
-    await showAlert('保存失败: ' + error.message, '错误', 'error');
+    if (saveStatusEl) saveStatusEl.textContent = '保存失败';
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = originalBtnText;
+      saveBtn.classList.remove('loading');
+    }
+    await showAlert('保存失败: ' + (error && error.message ? error.message : String(error)), '错误', 'error');
   }
 }
 // OAuth 授权登录 (已废弃，保留以防兼容性问题)

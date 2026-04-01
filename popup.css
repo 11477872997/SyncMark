@@ -761,6 +761,41 @@ input:checked + .toggle-slider:before {
   transform: scale(0.98);
 }
 
+/* 保存状态提示（在保存按钮旁显示短暂信息） */
+.save-status {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 12px;
+  color: #616161;
+  vertical-align: middle;
+}
+
+/* 保存按钮 loading 状态（显示小转圈） */
+.save-config-btn.loading {
+  position: relative;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.save-config-btn.loading::after {
+  content: '';
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  border-top-color: white;
+  border-radius: 50%;
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* OAuth 授权登录按钮 */
 .oauth-login-btn {
   width: 100%;
