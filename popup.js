@@ -79,6 +79,21 @@ async function loadRemoteBookmarkCount() {
       giteeSyncGroup.classList.add('hidden');
     }
 
+    // 处理单个按钮组时占满宽度
+    const githubVisible = config.githubToken;
+    const giteeVisible = config.giteeToken;
+
+    if (githubVisible && !giteeVisible) {
+      githubSyncGroup.classList.add('full-width');
+      giteeSyncGroup.classList.remove('full-width');
+    } else if (!githubVisible && giteeVisible) {
+      giteeSyncGroup.classList.add('full-width');
+      githubSyncGroup.classList.remove('full-width');
+    } else {
+      githubSyncGroup.classList.remove('full-width');
+      giteeSyncGroup.classList.remove('full-width');
+    }
+
     // 控制分隔线显示：使用 class 切换以支持过渡动画
     try {
       const div1 = document.getElementById('dividerLocalToGithub');

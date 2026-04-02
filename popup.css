@@ -439,7 +439,7 @@ body {
   font-size: 13px;
 }
 
-.history-select {
+.history-select2 {
   padding: 6px 8px;
   border: 1px solid #e0e0e0;
   border-radius: 6px;
@@ -682,6 +682,13 @@ input:checked+.toggle-slider:before {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
+}
+
+/* 当只有一个按钮组显示时，占满整个宽度 */
+.sync-group.full-width {
+  flex: 1 1 100%;
+  max-width: 100%;
 }
 
 .sync-header {
@@ -951,6 +958,7 @@ input:checked+.toggle-slider:before {
   overflow-x: hidden;
   /* prevent horizontal scrollbar inside the panel */
   padding: 16px;
+  padding-bottom: 35px;
 }
 
 @keyframes slideInRight {
