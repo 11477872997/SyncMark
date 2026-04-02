@@ -19,6 +19,70 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   if (config.autoSync) {
     setupAutoSync(config.syncInterval || 1440);
   }
+  // 标记当前是否存在未同步的本地书签
+  try { await markUnsynced(); } catch(e) { console.warn('初始化标记未同步失败:', e); }
+});
+
+// 在后台监听本地书签变化，实时标记为未同步并更新角标
+chrome.bookmarks.onCreated.addListener(() => { markUnsynced().catch(e=>console.warn(e)); });
+chrome.bookmarks.onRemoved.addListener(() => { markUnsynced().catch(e=>console.warn(e)); });
+chrome.bookmarks.onChanged.addListener(() => { markUnsynced().catch(e=>console.warn(e)); });
+chrome.bookmarks.onMoved.addListener(() => { markUnsynced().catch(e=>console.warn(e)); });
+
+// 启动时同步角标状态
+chrome.runtime.onStartup.addListener(() => {
+  updateActionBadge().catch(e=>console.warn(e));
+});
+
+// 标记为未同步（对比 lastSyncCount 判断）
+async function markUnsynced() {
+  try {
+    const res = await chrome.storage.local.get(['lastSyncCount']);
+    const tree = await chrome.bookmarks.getTree();
+    const current = countBookmarks(tree[0]);
+    const last = res.lastSyncCount !== undefined ? res.lastSyncCount : null;
+    // 如果没有 lastSyncCount（首次）且 current>0，视为未同步
+    const hasUnsynced = (last === null && current > 0) || (last !== null && current !== last);
+    await chrome.storage.local.set({ hasUnsynced });
+    await updateActionBadge();
+  } catch (e) {
+    console.warn('标记未同步失败:', e);
+  }
+}
+
+// 根据 storage 中的 hasUnsynced 更新扩展图标角标（红点）
+async function updateActionBadge() {
+  try {
+    const res = await chrome.storage.local.get(['hasUnsynced', 'githubToken', 'giteeToken']);
+    const has = !!res.hasUnsynced;
+    const loggedIn = !!(res.githubToken || res.giteeToken);
+
+    // 如果未登录任何平台，则不显示角标（即使本地有未同步标记）
+    if (!loggedIn) {
+      chrome.action.setBadgeText({ text: '' });
+      return;
+    }
+
+    if (has) {
+      // 使用一个小圆点作为角标文本并设置为红色
+      chrome.action.setBadgeText({ text: '●' });
+      try { chrome.action.setBadgeBackgroundColor({ color: '#FF3B30' }); } catch(e) { /* ignore */ }
+    } else {
+      chrome.action.setBadgeText({ text: '' });
+    }
+  } catch (e) {
+    console.warn('更新角标失败:', e);
+  }
+}
+
+// 当相关 storage 变更时自动刷新角标（例如 token 变更、hasUnsynced 变更）
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local') return;
+  const keys = Object.keys(changes);
+  const watched = ['hasUnsynced', 'githubToken', 'giteeToken', 'lastSyncCount'];
+  if (keys.some(k => watched.includes(k))) {
+    updateActionBadge().catch(e => console.warn('storage change 更新角标失败:', e));
+  }
 });
 
 // 监听来自popup的消息
@@ -161,6 +225,14 @@ async function performSync(platform) {
     }
 
     await chrome.storage.local.set(storageData);
+
+    // 已经同步成功，清除未同步标记并更新角标
+    try {
+      await chrome.storage.local.set({ hasUnsynced: false });
+      await updateActionBadge();
+    } catch (e) {
+      console.warn('同步成功后清除未同步标记失败:', e);
+    }
 
     // 追加同步历史并通知 popup（如果打开）
     try {

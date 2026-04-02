@@ -49,12 +49,16 @@ async function loadRemoteBookmarkCount() {
     const githubSyncGroup = document.getElementById('githubSyncGroup');
 
     if (config.githubToken) {
-      githubInfoItem.style.display = 'flex';
+      githubInfoItem.classList.remove('hidden');
+      githubInfoItem.classList.add('visible');
       githubCountEl.textContent = config.githubRemoteCount !== undefined ? config.githubRemoteCount : '-';
-      githubSyncGroup.style.display = 'flex';
+      githubSyncGroup.classList.remove('hidden');
+      githubSyncGroup.classList.add('visible');
     } else {
-      githubInfoItem.style.display = 'none';
-      githubSyncGroup.style.display = 'none';
+      githubInfoItem.classList.remove('visible');
+      githubInfoItem.classList.add('hidden');
+      githubSyncGroup.classList.remove('visible');
+      githubSyncGroup.classList.add('hidden');
     }
 
     // 显示/隐藏 Gitee 信息卡和按钮组
@@ -63,12 +67,16 @@ async function loadRemoteBookmarkCount() {
     const giteeSyncGroup = document.getElementById('giteeSyncGroup');
 
     if (config.giteeToken) {
-      giteeInfoItem.style.display = 'flex';
+      giteeInfoItem.classList.remove('hidden');
+      giteeInfoItem.classList.add('visible');
       giteeCountEl.textContent = config.giteeRemoteCount !== undefined ? config.giteeRemoteCount : '-';
-      giteeSyncGroup.style.display = 'flex';
+      giteeSyncGroup.classList.remove('hidden');
+      giteeSyncGroup.classList.add('visible');
     } else {
-      giteeInfoItem.style.display = 'none';
-      giteeSyncGroup.style.display = 'none';
+      giteeInfoItem.classList.remove('visible');
+      giteeInfoItem.classList.add('hidden');
+      giteeSyncGroup.classList.remove('visible');
+      giteeSyncGroup.classList.add('hidden');
     }
 
     // 控制分隔线显示：使用 class 切换以支持过渡动画
@@ -76,8 +84,8 @@ async function loadRemoteBookmarkCount() {
       const div1 = document.getElementById('dividerLocalToGithub');
       const div2 = document.getElementById('dividerGithubToGitee');
 
-      const ghVisible = githubInfoItem.style.display !== 'none';
-      const geVisible = giteeInfoItem.style.display !== 'none';
+      const ghVisible = githubInfoItem.classList.contains('visible');
+      const geVisible = giteeInfoItem.classList.contains('visible');
 
       if (div1) {
         div1.classList.toggle('visible', ghVisible || geVisible);
@@ -193,12 +201,22 @@ async function loadSyncStatus() {
       const geLogged = !!result.giteeToken;
 
       if (ghRow) {
-        ghRow.classList.toggle('visible', ghLogged);
-        ghRow.classList.toggle('hidden', !ghLogged);
+        if (ghLogged) {
+          ghRow.classList.remove('hidden');
+          ghRow.classList.add('visible');
+        } else {
+          ghRow.classList.remove('visible');
+          ghRow.classList.add('hidden');
+        }
       }
       if (geRow) {
-        geRow.classList.toggle('visible', geLogged);
-        geRow.classList.toggle('hidden', !geLogged);
+        if (geLogged) {
+          geRow.classList.remove('hidden');
+          geRow.classList.add('visible');
+        } else {
+          geRow.classList.remove('visible');
+          geRow.classList.add('hidden');
+        }
       }
 
       if (ghBadge) {
@@ -412,14 +430,16 @@ function escapeHtml(s){
 }
 
 // 监听后台推送的状态更新，实时刷新 UI
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
   try {
     if (msg && msg.action === 'platformSyncUpdate') {
       // msg: { action:'platformSyncUpdate', platform, status, time, count }
-      loadSyncStatus();
+      await loadSyncStatus();
       // 写历史并刷新
-      addSyncHistory({ platform: msg.platform, action: msg.type || 'auto', status: msg.status, time: msg.time || Date.now(), count: msg.count });
-      loadSyncHistory();
+      await addSyncHistory({ platform: msg.platform, action: msg.type || 'auto', status: msg.status, time: msg.time || Date.now(), count: msg.count });
+      await loadSyncHistory();
+      // 同步后可能影响未同步提示，重新检查并更新 UI
+      try { await checkUnsyncedBookmarks(); } catch (e) { /* ignore */ }
     }
   } catch (e) {
     console.warn('处理后台消息失败:', e);
@@ -608,14 +628,18 @@ async function loadUserInfo() {
       ghAvatar.src = 'icons/icon48.png';
     }
 
-    // 根据 token 显示配置或退出按钮
-    if (config.githubToken) {
-      if (ghLogoutBtn) ghLogoutBtn.style.display = 'inline-block';
-      if (ghConfigBtn) ghConfigBtn.style.display = 'none';
-    } else {
-      if (ghLogoutBtn) ghLogoutBtn.style.display = 'none';
-      if (ghConfigBtn) ghConfigBtn.style.display = 'inline-block';
-    }
+    // 根据 token 显示配置或退出按钮：使用 class 切换（保留 CSS 控制）
+    try {
+      if (ghLogoutBtn) {
+        ghLogoutBtn.classList.toggle('hidden', !config.githubToken);
+        // fallback: ensure visible via inline style when not hidden (helps some browsers/themes)
+        ghLogoutBtn.style.display = ghLogoutBtn.classList.contains('hidden') ? 'none' : 'inline-block';
+      }
+      if (ghConfigBtn) {
+        ghConfigBtn.classList.toggle('hidden', !!config.githubToken);
+        ghConfigBtn.style.display = ghConfigBtn.classList.contains('hidden') ? 'none' : 'inline-block';
+      }
+    } catch (e) { /* ignore */ }
 
     // Gitee 显示
     const geNameEl = document.getElementById('giteeUserName');
@@ -651,13 +675,16 @@ async function loadUserInfo() {
       geAvatar.src = 'icons/icon48.png';
     }
 
-    if (config.giteeToken) {
-      if (geLogoutBtn) geLogoutBtn.style.display = 'inline-block';
-      if (geConfigBtn) geConfigBtn.style.display = 'none';
-    } else {
-      if (geLogoutBtn) geLogoutBtn.style.display = 'none';
-      if (geConfigBtn) geConfigBtn.style.display = 'inline-block';
-    }
+    try {
+      if (geLogoutBtn) {
+        geLogoutBtn.classList.toggle('hidden', !config.giteeToken);
+        geLogoutBtn.style.display = geLogoutBtn.classList.contains('hidden') ? 'none' : 'inline-block';
+      }
+      if (geConfigBtn) {
+        geConfigBtn.classList.toggle('hidden', !!config.giteeToken);
+        geConfigBtn.style.display = geConfigBtn.classList.contains('hidden') ? 'none' : 'inline-block';
+      }
+    } catch (e) { /* ignore */ }
   } catch (error) {
     console.error('加载用户信息失败:', error);
     // 回退显示
