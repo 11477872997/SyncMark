@@ -120,6 +120,18 @@
             <span class="status-label">上次同步</span>
             <span class="status-time" id="lastSyncTime">2026/3/31 17:43:04</span>
           </div>
+          <!-- 平台级别同步状态 -->
+          <div class="status-divider"></div>
+          <div class="status-row platform-status" id="githubStatusRow" style="display:none;">
+            <span class="status-label">GitHub 同步</span>
+            <span class="status-badge" id="githubStatusBadge">未同步</span>
+            <span class="status-time" id="githubLastSyncTime" style="margin-left:8px;">-</span>
+          </div>
+          <div class="status-row platform-status" id="giteeStatusRow" style="display:none;">
+            <span class="status-label">Gitee 同步</span>
+            <span class="status-badge" id="giteeStatusBadge">未同步</span>
+            <span class="status-time" id="giteeLastSyncTime" style="margin-left:8px;">-</span>
+          </div>
           <div class="status-divider"></div>
           <div class="status-row">
             <div class="auto-sync-info">

@@ -145,31 +145,85 @@ function countBookmarks(node) {
 // 加载同步状态
 async function loadSyncStatus() {
   try {
-    const result = await chrome.storage.local.get(['lastSyncTime', 'syncStatus']);
+    // 读取通用和平台级别的同步状态
+    const result = await chrome.storage.local.get([
+      'lastSyncTime', 'syncStatus',
+      'githubLastSyncTime', 'githubSyncStatus',
+      'giteeLastSyncTime', 'giteeSyncStatus',
+      'githubToken', 'giteeToken'
+    ]);
 
-    // 更新同步时间
+    // 更新通用同步时间（保留兼容）
     if (result.lastSyncTime) {
       document.getElementById('lastSyncTime').textContent = formatTime(result.lastSyncTime);
     } else {
       document.getElementById('lastSyncTime').textContent = '从未同步';
     }
 
-    // 更新同步状态
+    // 更新通用状态 badge（兼容旧逻辑）
     const statusBadge = document.getElementById('statusBadge');
     const noticeText = document.getElementById('noticeText');
-
     if (result.syncStatus === 'success') {
       statusBadge.textContent = '同步成功';
       statusBadge.className = 'status-badge success';
-      noticeText.textContent = '首次同步完成，已上传本书签至远端';
     } else if (result.syncStatus === 'error') {
       statusBadge.textContent = '同步失败';
       statusBadge.className = 'status-badge error';
-      noticeText.textContent = '同步失败，请检查网络或配置';
     } else {
       statusBadge.textContent = '未同步';
       statusBadge.className = 'status-badge';
-      noticeText.textContent = '请先在设置中配置同步方式';
+    }
+
+    // 平台级别显示：如果已配置 token 则显示对应行并填充状态
+    try {
+      const ghRow = document.getElementById('githubStatusRow');
+      const geRow = document.getElementById('giteeStatusRow');
+      const ghBadge = document.getElementById('githubStatusBadge');
+      const geBadge = document.getElementById('giteeStatusBadge');
+      const ghTime = document.getElementById('githubLastSyncTime');
+      const geTime = document.getElementById('giteeLastSyncTime');
+
+      const ghLogged = !!result.githubToken;
+      const geLogged = !!result.giteeToken;
+
+      if (ghRow) ghRow.style.display = ghLogged ? 'flex' : 'none';
+      if (geRow) geRow.style.display = geLogged ? 'flex' : 'none';
+
+      if (ghBadge) {
+        if (result.githubSyncStatus === 'success') {
+          ghBadge.textContent = '同步成功';
+          ghBadge.className = 'status-badge success';
+        } else if (result.githubSyncStatus === 'error') {
+          ghBadge.textContent = '同步失败';
+          ghBadge.className = 'status-badge error';
+        } else {
+          ghBadge.textContent = '未同步';
+          ghBadge.className = 'status-badge';
+        }
+      }
+
+      if (geBadge) {
+        if (result.giteeSyncStatus === 'success') {
+          geBadge.textContent = '同步成功';
+          geBadge.className = 'status-badge success';
+        } else if (result.giteeSyncStatus === 'error') {
+          geBadge.textContent = '同步失败';
+          geBadge.className = 'status-badge error';
+        } else {
+          geBadge.textContent = '未同步';
+          geBadge.className = 'status-badge';
+        }
+      }
+
+      if (ghTime) ghTime.textContent = result.githubLastSyncTime ? formatTime(result.githubLastSyncTime) : '-';
+      if (geTime) geTime.textContent = result.giteeLastSyncTime ? formatTime(result.giteeLastSyncTime) : '-';
+
+      // 更新 notice 文本：如果有未同步数量或平台错误更明显显示
+      if (result.syncStatus === 'error' || result.githubSyncStatus === 'error' || result.giteeSyncStatus === 'error') {
+        noticeText.textContent = '部分平台同步失败，请检查配置或网络';
+      }
+    } catch (e) {
+      console.warn('更新平台同步状态失败:', e);
     }
   } catch (error) {
     console.error('加载同步状态失败:', error);
@@ -967,6 +1021,14 @@ async function handleUpload(platform) {
       await showAlert(`已成功上传 ${localCount} 个书签到 ${platformName}`, '上传成功', 'success');
 
       // 更新显示
+      // 记录平台级别的同步状态和时间
+      const now = Date.now();
+      if (platform === 'github') {
+        await chrome.storage.local.set({ githubSyncStatus: 'success', githubLastSyncTime: now, lastSyncTime: now, syncStatus: 'success', lastSyncCount: localCount, githubLastSyncCount: localCount });
+      } else {
+        await chrome.storage.local.set({ giteeSyncStatus: 'success', giteeLastSyncTime: now, lastSyncTime: now, syncStatus: 'success', lastSyncCount: localCount, giteeLastSyncCount: localCount });
+      }
+
       await loadSyncStatus();
       await fetchRemoteBookmarkCount(platform);
       await checkUnsyncedBookmarks();
@@ -986,6 +1048,18 @@ async function handleUpload(platform) {
       '上传失败',
       'error'
     );
+    // 记录平台错误状态
+    try {
+      const now = Date.now();
+      if (platform === 'github') {
+        await chrome.storage.local.set({ githubSyncStatus: 'error', githubLastSyncTime: now });
+      } else {
+        await chrome.storage.local.set({ giteeSyncStatus: 'error', giteeLastSyncTime: now });
+      }
+      await loadSyncStatus();
+    } catch (e) {
+      console.warn('记录平台同步错误状态失败:', e);
+    }
   } finally {
     uploadButton.classList.remove('syncing');
     uploadButton.disabled = false;
@@ -1057,6 +1131,15 @@ async function handleDownload(platform) {
       noticeText.textContent = `已成功从 ${platformName} 恢复 ${response.count || 0} 个书签`;
 
       // 更新显示
+      // 记录平台级别的同步状态和时间
+      const now = Date.now();
+      const recovered = response.count || 0;
+      if (platform === 'github') {
+        await chrome.storage.local.set({ githubSyncStatus: 'success', githubLastSyncTime: now, lastSyncTime: now, syncStatus: 'success', lastSyncCount: recovered, githubLastSyncCount: recovered });
+      } else {
+        await chrome.storage.local.set({ giteeSyncStatus: 'success', giteeLastSyncTime: now, lastSyncTime: now, syncStatus: 'success', lastSyncCount: recovered, giteeLastSyncCount: recovered });
+      }
+
       await loadBookmarkCount();
       await loadSyncStatus();
       await checkUnsyncedBookmarks();
@@ -1074,6 +1157,18 @@ async function handleDownload(platform) {
     noticeText.textContent = errorMsg;
 
     await showAlert(errorMsg, '恢复失败', 'error');
+    // 记录平台错误状态
+    try {
+      const now = Date.now();
+      if (platform === 'github') {
+        await chrome.storage.local.set({ githubSyncStatus: 'error', githubLastSyncTime: now });
+      } else {
+        await chrome.storage.local.set({ giteeSyncStatus: 'error', giteeLastSyncTime: now });
+      }
+      await loadSyncStatus();
+    } catch (e) {
+      console.warn('记录平台恢复错误状态失败:', e);
+    }
   } finally {
     downloadButton.classList.remove('syncing');
     downloadButton.disabled = false;
