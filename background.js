@@ -138,9 +138,10 @@ async function performSync(platform) {
       throw new Error('不支持的同步平台');
     }
 
-    // 保存同步状态
+    // 保存同步状态（包括平台级别字段，便于 popup 显示）
+    const now = Date.now();
     const storageData = {
-      lastSyncTime: Date.now(),
+      lastSyncTime: now,
       lastSyncCount: bookmarkCount,
       syncStatus: 'success'
     };
@@ -148,22 +149,67 @@ async function performSync(platform) {
     if (platform === 'github') {
       storageData.githubGistId = result.gistId;
       storageData.githubRemoteCount = bookmarkCount;
+      storageData.githubSyncStatus = 'success';
+      storageData.githubLastSyncTime = now;
+      storageData.githubLastSyncCount = bookmarkCount;
     } else {
       storageData.giteeGistId = result.gistId;
       storageData.giteeRemoteCount = bookmarkCount;
+      storageData.giteeSyncStatus = 'success';
+      storageData.giteeLastSyncTime = now;
+      storageData.giteeLastSyncCount = bookmarkCount;
     }
 
     await chrome.storage.local.set(storageData);
+
+    // 追加同步历史并通知 popup（如果打开）
+    try {
+      const history = await chrome.storage.local.get(['syncHistory']);
+      const list = history.syncHistory || [];
+      list.unshift({ platform, action: 'upload', status: 'success', time: now, count: bookmarkCount });
+      await chrome.storage.local.set({ syncHistory: list.slice(0, 50) });
+    } catch (e) {
+      console.warn('记录同步历史失败:', e);
+    }
+
+    try {
+      chrome.runtime.sendMessage({ action: 'platformSyncUpdate', platform, status: 'success', time: now, count: bookmarkCount, type: 'upload' });
+    } catch (e) { /* ignore */ }
 
     console.log('同步成功:', result);
     return result;
   } catch (error) {
     console.error('同步失败:', error);
 
-    // 保存失败状态
-    await chrome.storage.local.set({
-      syncStatus: 'error'
-    });
+    // 保存失败状态（同时写入平台级错误状态）
+    try {
+      const errData = { syncStatus: 'error' };
+      const nowErr = Date.now();
+      if (platform === 'github') {
+        errData.githubSyncStatus = 'error';
+        errData.githubLastSyncTime = nowErr;
+      } else if (platform === 'gitee') {
+        errData.giteeSyncStatus = 'error';
+        errData.giteeLastSyncTime = nowErr;
+      }
+      await chrome.storage.local.set(errData);
+
+      // 追加失败历史并通知 popup
+      try {
+        const history = await chrome.storage.local.get(['syncHistory']);
+        const list = history.syncHistory || [];
+        list.unshift({ platform, action: 'upload', status: 'error', time: nowErr, count: bookmarkCount });
+        await chrome.storage.local.set({ syncHistory: list.slice(0, 50) });
+      } catch (e) {
+        console.warn('记录失败同步历史失败:', e);
+      }
+
+      try {
+        chrome.runtime.sendMessage({ action: 'platformSyncUpdate', platform, status: 'error', time: nowErr, count: bookmarkCount, type: 'upload' });
+      } catch (e) { /* ignore */ }
+    } catch (e) {
+      console.warn('记录后台同步错误状态失败:', e);
+    }
 
     throw error;
   }
@@ -400,16 +446,74 @@ async function restoreFromRemote(platform) {
       console.error('远程书签数据格式错误');
     }
 
-    // 保存恢复状态
-    await chrome.storage.local.set({
-      lastSyncTime: Date.now(),
-      lastSyncCount: bookmarkData.count || 0,
-      syncStatus: 'success'
-    });
+    // 保存恢复状态（包含平台级字段）
+    try {
+      const now = Date.now();
+      const data = {
+        lastSyncTime: now,
+        lastSyncCount: bookmarkData.count || 0,
+        syncStatus: 'success'
+      };
+      if (platform === 'github') {
+        data.githubSyncStatus = 'success';
+        data.githubLastSyncTime = now;
+        data.githubLastSyncCount = bookmarkData.count || 0;
+      } else if (platform === 'gitee') {
+        data.giteeSyncStatus = 'success';
+        data.giteeLastSyncTime = now;
+        data.giteeLastSyncCount = bookmarkData.count || 0;
+      }
+      await chrome.storage.local.set(data);
+
+      // 追加恢复历史并通知 popup
+      try {
+        const history = await chrome.storage.local.get(['syncHistory']);
+        const list = history.syncHistory || [];
+        list.unshift({ platform, action: 'download', status: 'success', time: now, count: bookmarkData.count || 0 });
+        await chrome.storage.local.set({ syncHistory: list.slice(0, 50) });
+      } catch (e) {
+        console.warn('记录恢复历史失败:', e);
+      }
+
+      try {
+        chrome.runtime.sendMessage({ action: 'platformSyncUpdate', platform, status: 'success', time: now, count: bookmarkData.count || 0, type: 'download' });
+      } catch (e) { /* ignore */ }
+    } catch (e) {
+      console.warn('保存恢复状态失败:', e);
+    }
 
     return { count: bookmarkData.count || 0 };
   } catch (error) {
     console.error('恢复书签失败:', error);
+    // 记录恢复失败的平台状态并写历史，便于 UI 提示
+    try {
+      const nowErr = Date.now();
+      const errData = { syncStatus: 'error' };
+      if (platform === 'github') {
+        errData.githubSyncStatus = 'error';
+        errData.githubLastSyncTime = nowErr;
+      } else if (platform === 'gitee') {
+        errData.giteeSyncStatus = 'error';
+        errData.giteeLastSyncTime = nowErr;
+      }
+      await chrome.storage.local.set(errData);
+
+      try {
+        const history = await chrome.storage.local.get(['syncHistory']);
+        const list = history.syncHistory || [];
+        list.unshift({ platform, action: 'download', status: 'error', time: nowErr, count: bookmarkData && bookmarkData.count ? bookmarkData.count : 0 });
+        await chrome.storage.local.set({ syncHistory: list.slice(0, 50) });
+      } catch (e) {
+        console.warn('记录恢复失败历史失败:', e);
+      }
+
+      try {
+        chrome.runtime.sendMessage({ action: 'platformSyncUpdate', platform, status: 'error', time: nowErr, count: bookmarkData && bookmarkData.count ? bookmarkData.count : 0, type: 'download' });
+      } catch (e) { /* ignore */ }
+    } catch (e) {
+      console.warn('记录后台恢复错误状态失败:', e);
+    }
+
     throw error;
   }
 }

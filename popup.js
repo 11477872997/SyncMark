@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadBookmarkCount();
   await loadRemoteBookmarkCount();
   await loadSyncStatus();
+  await loadSyncHistory();
   await loadAutoSyncStatus();
   await checkUnsyncedBookmarks();
   await loadConfigSettings();
@@ -70,9 +71,7 @@ async function loadRemoteBookmarkCount() {
       giteeSyncGroup.style.display = 'none';
     }
 
-    // 控制分隔线显示：
-    // dividerLocalToGithub 在本地与 GitHub/Gitee 之间，当任一远端可见时显示
-    // dividerGithubToGitee 在 GitHub 与 Gitee 之间，仅当两者都可见时显示
+    // 控制分隔线显示：使用 class 切换以支持过渡动画
     try {
       const div1 = document.getElementById('dividerLocalToGithub');
       const div2 = document.getElementById('dividerGithubToGitee');
@@ -80,10 +79,17 @@ async function loadRemoteBookmarkCount() {
       const ghVisible = githubInfoItem.style.display !== 'none';
       const geVisible = giteeInfoItem.style.display !== 'none';
 
-      if (div1) div1.style.display = (ghVisible || geVisible) ? 'flex' : 'none';
-      if (div2) div2.style.display = (ghVisible && geVisible) ? 'flex' : 'none';
+      if (div1) {
+        div1.classList.toggle('visible', ghVisible || geVisible);
+        div1.classList.toggle('hidden', !(ghVisible || geVisible));
+        div1.classList.add('fade-transition');
+      }
+      if (div2) {
+        div2.classList.toggle('visible', ghVisible && geVisible);
+        div2.classList.toggle('hidden', !(ghVisible && geVisible));
+        div2.classList.add('fade-transition');
+      }
     } catch (e) {
-      // 忽略 DOM 异常
       console.warn('无法更新分隔线显示:', e);
     }
   } catch (error) {
@@ -186,8 +192,14 @@ async function loadSyncStatus() {
       const ghLogged = !!result.githubToken;
       const geLogged = !!result.giteeToken;
 
-      if (ghRow) ghRow.style.display = ghLogged ? 'flex' : 'none';
-      if (geRow) geRow.style.display = geLogged ? 'flex' : 'none';
+      if (ghRow) {
+        ghRow.classList.toggle('visible', ghLogged);
+        ghRow.classList.toggle('hidden', !ghLogged);
+      }
+      if (geRow) {
+        geRow.classList.toggle('visible', geLogged);
+        geRow.classList.toggle('hidden', !geLogged);
+      }
 
       if (ghBadge) {
         if (result.githubSyncStatus === 'success') {
@@ -215,8 +227,13 @@ async function loadSyncStatus() {
         }
       }
 
-      if (ghTime) ghTime.textContent = result.githubLastSyncTime ? formatTime(result.githubLastSyncTime) : '-';
-      if (geTime) geTime.textContent = result.giteeLastSyncTime ? formatTime(result.giteeLastSyncTime) : '-';
+  if (ghTime) ghTime.textContent = result.githubLastSyncTime ? formatTime(result.githubLastSyncTime) : '-';
+  if (geTime) geTime.textContent = result.giteeLastSyncTime ? formatTime(result.giteeLastSyncTime) : '-';
+  // 显示上次同步数量
+  const ghCountEl = document.getElementById('githubLastSyncCount');
+  const geCountEl = document.getElementById('giteeLastSyncCount');
+  if (ghCountEl) ghCountEl.textContent = result.githubLastSyncCount !== undefined ? `上次: ${result.githubLastSyncCount}` : '-';
+  if (geCountEl) geCountEl.textContent = result.giteeLastSyncCount !== undefined ? `上次: ${result.giteeLastSyncCount}` : '-';
 
       // 更新 notice 文本：如果有未同步数量或平台错误更明显显示
       if (result.syncStatus === 'error' || result.githubSyncStatus === 'error' || result.giteeSyncStatus === 'error') {
@@ -263,6 +280,151 @@ function formatTime(timestamp) {
   const seconds = String(date.getSeconds()).padStart(2, '0');
   return `${year}/${month}/${day} ${hours}:${minutes}:${seconds}`;
 }
+
+// ========== 同步历史操作 ==========
+async function addSyncHistory(entry) {
+  try {
+    const result = await chrome.storage.local.get(['syncHistory']);
+    const list = result.syncHistory || [];
+    // 最新放前面
+    list.unshift(entry);
+    // 限制最大保存条数
+    const max = 50;
+    const newList = list.slice(0, max);
+    await chrome.storage.local.set({ syncHistory: newList });
+  } catch (e) {
+    console.warn('追加同步历史失败:', e);
+  }
+}
+
+async function loadSyncHistory() {
+  try {
+    // state
+    window._historyState = window._historyState || { page: 1, pageSize: 10, platform: 'all', status: 'all', search: '' };
+    const st = window._historyState;
+
+    const result = await chrome.storage.local.get(['syncHistory']);
+    const list = result.syncHistory || [];
+    const el = document.getElementById('syncHistoryList');
+    if (!el) return;
+
+    // 筛选
+    const filtered = list.filter(item => {
+      if (st.platform !== 'all' && item.platform !== st.platform) return false;
+      if (st.status !== 'all' && item.status !== st.status) return false;
+      if (st.search) {
+        const q = st.search.toLowerCase();
+        const hay = `${item.platform} ${item.action} ${item.status} ${item.count || ''} ${formatTime(item.time)}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    // 分页
+    const total = filtered.length;
+    const pageSize = parseInt(st.pageSize, 10) || 10;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    if (st.page > totalPages) st.page = totalPages;
+    if (st.page < 1) st.page = 1;
+    const start = (st.page - 1) * pageSize;
+    const pageItems = filtered.slice(start, start + pageSize);
+
+    // 渲染
+    el.innerHTML = '';
+    if (pageItems.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-text';
+      empty.textContent = '没有匹配的历史记录';
+      el.appendChild(empty);
+    } else {
+      for (const it of pageItems) {
+        const row = document.createElement('div');
+        row.className = 'history-item';
+        const left = document.createElement('div'); left.className = 'left';
+        const right = document.createElement('div'); right.className = 'right';
+
+        const title = document.createElement('div');
+        title.className = 'history-item-title';
+        title.textContent = `${it.platform} · ${it.action}`;
+
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        meta.textContent = `${it.status}`;
+
+        left.appendChild(title);
+        left.appendChild(meta);
+
+        const badge = document.createElement('span');
+        badge.className = `status-badge ${it.status === 'success' ? 'success' : it.status === 'error' ? 'error' : ''}`;
+        badge.textContent = it.status;
+
+        right.appendChild(badge);
+  const info = document.createElement('div');
+  info.className = 'history-item-info';
+  info.textContent = `${it.count || '-'} · ${formatTime(it.time)}`;
+        right.appendChild(info);
+
+        row.appendChild(left);
+        row.appendChild(right);
+        el.appendChild(row);
+      }
+    }
+
+    // 更新分页信息和控件状态
+    const pageInfo = document.getElementById('historyPageInfo');
+    if (pageInfo) pageInfo.textContent = `第 ${st.page} / ${totalPages} 页 · 共 ${total} 条`;
+
+    const prevBtn = document.getElementById('historyPrevBtn');
+    const nextBtn = document.getElementById('historyNextBtn');
+    if (prevBtn) prevBtn.disabled = st.page <= 1;
+    if (nextBtn) nextBtn.disabled = st.page >= totalPages;
+
+    // 绑定控件（仅首次绑定）
+    if (!window._historyControlsBound) {
+      window._historyControlsBound = true;
+      const searchInput = document.getElementById('historySearchInput');
+      const platformSel = document.getElementById('historyPlatformFilter');
+      const statusSel = document.getElementById('historyStatusFilter');
+      const pageSizeSel = document.getElementById('historyPageSize');
+      const clearBtn = document.getElementById('clearHistoryBtn');
+      if (searchInput) searchInput.addEventListener('input', (e) => { st.search = e.target.value.trim(); st.page = 1; loadSyncHistory(); });
+      if (platformSel) platformSel.addEventListener('change', (e) => { st.platform = e.target.value; st.page = 1; loadSyncHistory(); });
+      if (statusSel) statusSel.addEventListener('change', (e) => { st.status = e.target.value; st.page = 1; loadSyncHistory(); });
+      if (pageSizeSel) pageSizeSel.addEventListener('change', (e) => { st.pageSize = parseInt(e.target.value,10); st.page = 1; loadSyncHistory(); });
+      if (prevBtn) prevBtn.addEventListener('click', (e) => { if (st.page>1) { st.page--; loadSyncHistory(); } });
+      if (nextBtn) nextBtn.addEventListener('click', (e) => { st.page++; loadSyncHistory(); });
+      if (clearBtn) clearBtn.addEventListener('click', async (e) => { e.stopPropagation(); await chrome.storage.local.remove('syncHistory'); st.page = 1; loadSyncHistory(); });
+
+      // 初始化控件值
+      try { document.getElementById('historyPageSize').value = st.pageSize; } catch(e){}
+      try { document.getElementById('historyPlatformFilter').value = st.platform; } catch(e){}
+      try { document.getElementById('historyStatusFilter').value = st.status; } catch(e){}
+      try { document.getElementById('historySearchInput').value = st.search; } catch(e){}
+    }
+  } catch (e) {
+    console.warn('加载同步历史失败:', e);
+  }
+}
+
+function escapeHtml(s){
+  if (!s) return '';
+  return String(s).replace(/[&<>"]+/g, (c)=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]||c));
+}
+
+// 监听后台推送的状态更新，实时刷新 UI
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  try {
+    if (msg && msg.action === 'platformSyncUpdate') {
+      // msg: { action:'platformSyncUpdate', platform, status, time, count }
+      loadSyncStatus();
+      // 写历史并刷新
+      addSyncHistory({ platform: msg.platform, action: msg.type || 'auto', status: msg.status, time: msg.time || Date.now(), count: msg.count });
+      loadSyncHistory();
+    }
+  } catch (e) {
+    console.warn('处理后台消息失败:', e);
+  }
+});
 
 // Helper: 统一写入平台级同步状态并更新 UI
 async function setPlatformSyncStatus(platform, status, timestamp = Date.now(), count) {
@@ -810,9 +972,29 @@ function setupEventListeners() {
   // 清空本地书签
   document.getElementById('clearLocalBtn').addEventListener('click', handleClearLocal);
 
+  // 全部清除（清除扩展本地存储）
+  const clearAllBtn = document.getElementById('clearAllBtn');
+  if (clearAllBtn) clearAllBtn.addEventListener('click', handleClearAll);
+
+  // 打开同步历史抽屉（更多 -> 同步历史）
+  const openHistoryBtn = document.getElementById('openHistoryBtn');
+  if (openHistoryBtn) openHistoryBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openHistorySidebar();
+    // 隐藏更多菜单
+    const moreDropdown = document.getElementById('moreDropdown');
+    if (moreDropdown) moreDropdown.classList.remove('show');
+  });
+
   // 配置侧边栏关闭
   document.getElementById('configCloseBtn').addEventListener('click', closeConfigSidebar);
   document.getElementById('configOverlay').addEventListener('click', closeConfigSidebar);
+
+  // 同步历史抽屉关闭
+  const historyCloseBtn = document.getElementById('historyCloseBtn');
+  if (historyCloseBtn) historyCloseBtn.addEventListener('click', closeHistorySidebar);
+  const historyOverlay = document.getElementById('historyOverlay');
+  if (historyOverlay) historyOverlay.addEventListener('click', closeHistorySidebar);
 
   // GitHub 密码显示/隐藏
   document.getElementById('toggleGithubPasswordBtn').addEventListener('click', () => togglePasswordVisibility('github'));
@@ -918,6 +1100,44 @@ async function handleLogoutPlatform(platform) {
   }
 }
 
+// 全部清除扩展数据（不删除用户书签）
+async function handleClearAll() {
+  // 关闭更多菜单
+  const moreDropdown = document.getElementById('moreDropdown');
+  if (moreDropdown) moreDropdown.classList.remove('show');
+
+  const confirmed = await showConfirm(
+    `⚠️ 警告：执行全部清除将删除扩展的所有本地配置、Token、同步历史和缓存数据，但不会删除浏览器书签。
+
+是否继续？`,
+    '全部清除',
+    { type: 'warning', danger: true, confirmText: '全部清除', cancelText: '取消' }
+  );
+
+  if (!confirmed) return;
+
+  // 二次确认（避免误触）
+  const confirmed2 = await showConfirm(
+    `再次确认：这将恢复扩展到初始状态（所有配置、历史将被移除）。此操作不可撤销。确定要继续吗？`,
+    '最后确认',
+    { type: 'error', danger: true, confirmText: '确定清除', cancelText: '取消' }
+  );
+
+  if (!confirmed2) return;
+
+  try {
+    // 只清除扩展本地存储
+    await chrome.storage.local.clear();
+
+    await showAlert('已全部清除扩展本地数据，页面将刷新。', '已清除', 'success');
+    // 刷新 popup 以便 UI 更新
+    window.location.reload();
+  } catch (e) {
+    console.error('全部清除失败:', e);
+    await showAlert('清除失败: ' + (e && e.message ? e.message : String(e)), '错误', 'error');
+  }
+}
+
 // 打开配置侧边栏
 function openConfigSidebar() {
   console.log('Opening config sidebar...');
@@ -933,6 +1153,21 @@ function openConfigSidebar() {
 // 关闭配置侧边栏
 function closeConfigSidebar() {
   document.getElementById('configSidebar').classList.remove('show');
+}
+
+// 打开/关闭 同步历史抽屉
+function openHistorySidebar() {
+  const sb = document.getElementById('historySidebar');
+  if (!sb) return;
+  sb.classList.add('show');
+  // 加载最新历史
+  try { loadSyncHistory(); } catch (e) { /* ignore */ }
+}
+
+function closeHistorySidebar() {
+  const sb = document.getElementById('historySidebar');
+  if (!sb) return;
+  sb.classList.remove('show');
 }
 
 // 更多功能
@@ -1068,6 +1303,8 @@ async function handleUpload(platform) {
       // 记录平台级别的同步状态和时间（统一入口）
       const now = Date.now();
       await setPlatformSyncStatus(platform, 'success', now, localCount);
+  // 追加本地历史并刷新历史 UI
+  try { await addSyncHistory({ platform, action: 'upload', status: 'success', time: now, count: localCount }); await loadSyncHistory(); } catch (e) { console.warn('记录历史失败:', e); }
       await fetchRemoteBookmarkCount(platform);
       await checkUnsyncedBookmarks();
     } else {
@@ -1090,6 +1327,7 @@ async function handleUpload(platform) {
     try {
       const now = Date.now();
       await setPlatformSyncStatus(platform, 'error', now);
+      try { await addSyncHistory({ platform, action: 'upload', status: 'error', time: now, count: localCount }); await loadSyncHistory(); } catch (e) { console.warn('记录失败历史失败:', e); }
     } catch (e) {
       console.warn('记录平台同步错误状态失败:', e);
     }
@@ -1169,6 +1407,8 @@ async function handleDownload(platform) {
       const recovered = response.count || 0;
       await setPlatformSyncStatus(platform, 'success', now, recovered);
 
+  try { await addSyncHistory({ platform, action: 'download', status: 'success', time: now, count: recovered }); await loadSyncHistory(); } catch (e) { console.warn('记录历史失败:', e); }
+
       await loadBookmarkCount();
       await checkUnsyncedBookmarks();
 
@@ -1189,6 +1429,7 @@ async function handleDownload(platform) {
     try {
       const now = Date.now();
       await setPlatformSyncStatus(platform, 'error', now);
+      try { await addSyncHistory({ platform, action: 'download', status: 'error', time: now, count: 0 }); await loadSyncHistory(); } catch (e) { console.warn('记录失败历史失败:', e); }
     } catch (e) {
       console.warn('记录平台恢复错误状态失败:', e);
     }
