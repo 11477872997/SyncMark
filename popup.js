@@ -632,8 +632,14 @@ async function loadUserInfo() {
           ghAvatar.src = u.avatar_url || u.avatar || 'icons/icon48.png';
         } catch (e) {
           console.warn('获取 GitHub 用户信息失败:', e);
-          ghNameEl.textContent = '登录但无法获取信息';
-          ghEmailEl.textContent = '';
+          // 根据错误状态码显示不同的提示信息
+          if (e.status === 401) {
+            ghNameEl.textContent = 'GitHub Token 无效';
+            ghEmailEl.textContent = '请重新配置 Token';
+          } else {
+            ghNameEl.textContent = '登录但无法获取信息';
+            ghEmailEl.textContent = '';
+          }
           ghAvatar.src = 'icons/icon48.png';
         }
       })();
@@ -679,8 +685,14 @@ async function loadUserInfo() {
           geAvatar.src = u.avatar || u.avatar_url || 'icons/icon48.png';
         } catch (e) {
           console.warn('获取 Gitee 用户信息失败:', e);
-          geNameEl.textContent = '登录但无法获取信息';
-          geEmailEl.textContent = '';
+          // 根据错误状态码显示不同的提示信息
+          if (e.status === 401) {
+            geNameEl.textContent = 'Gitee Token 无效';
+            geEmailEl.textContent = '请重新配置 Token';
+          } else {
+            geNameEl.textContent = '登录但无法获取信息';
+            geEmailEl.textContent = '';
+          }
           geAvatar.src = 'icons/icon48.png';
         }
       })();
@@ -720,7 +732,10 @@ async function fetchGitHubUserInfo(token) {
   });
 
   if (!response.ok) {
-    throw new Error('获取 GitHub 用户信息失败');
+    const error = new Error('获取 GitHub 用户信息失败');
+    error.status = response.status;
+    error.platform = 'GitHub';
+    throw error;
   }
 
   return await response.json();
@@ -731,7 +746,10 @@ async function fetchGiteeUserInfo(token) {
   const response = await fetch(`https://gitee.com/api/v5/user?access_token=${token}`);
 
   if (!response.ok) {
-    throw new Error('获取 Gitee 用户信息失败');
+    const error = new Error('获取 Gitee 用户信息失败');
+    error.status = response.status;
+    error.platform = 'Gitee';
+    throw error;
   }
 
   return await response.json();
@@ -796,7 +814,48 @@ async function handleSaveConfig() {
       return;
     }
 
-    // 保存配置到本地（这一步较快，可立即反馈成功）
+    // 先验证 Token 是否有效，再保存配置
+    saveStatusEl.textContent = '验证 Token...';
+    const validationErrors = [];
+
+    if (githubToken) {
+      try {
+        await fetchGitHubUserInfo(githubToken);
+      } catch (error) {
+        if (error.status === 401) {
+          validationErrors.push('GitHub Token 无效，请检查后重新输入');
+        } else {
+          validationErrors.push('GitHub Token 验证失败: ' + error.message);
+        }
+      }
+    }
+
+    if (giteeToken) {
+      try {
+        await fetchGiteeUserInfo(giteeToken);
+      } catch (error) {
+        if (error.status === 401) {
+          validationErrors.push('Gitee Token 无效，请检查后重新输入');
+        } else {
+          validationErrors.push('Gitee Token 验证失败: ' + error.message);
+        }
+      }
+    }
+
+    // 如果有验证错误，阻止保存并提示用户
+    if (validationErrors.length > 0) {
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = originalBtnText;
+        saveBtn.classList.remove('loading');
+      }
+      saveStatusEl.textContent = '验证失败';
+      await showAlert(validationErrors.join('\n'), 'Token 验证失败', 'error');
+      return;
+    }
+
+    // Token 验证通过，保存配置到本地
+    saveStatusEl.textContent = '保存中...';
     const config = { syncInterval: syncInterval };
     if (githubToken) config.githubToken = githubToken;
     if (giteeToken) config.giteeToken = giteeToken;
