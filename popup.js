@@ -69,6 +69,23 @@ async function loadRemoteBookmarkCount() {
       giteeInfoItem.style.display = 'none';
       giteeSyncGroup.style.display = 'none';
     }
+
+    // 控制分隔线显示：
+    // dividerLocalToGithub 在本地与 GitHub/Gitee 之间，当任一远端可见时显示
+    // dividerGithubToGitee 在 GitHub 与 Gitee 之间，仅当两者都可见时显示
+    try {
+      const div1 = document.getElementById('dividerLocalToGithub');
+      const div2 = document.getElementById('dividerGithubToGitee');
+
+      const ghVisible = githubInfoItem.style.display !== 'none';
+      const geVisible = giteeInfoItem.style.display !== 'none';
+
+      if (div1) div1.style.display = (ghVisible || geVisible) ? 'flex' : 'none';
+      if (div2) div2.style.display = (ghVisible && geVisible) ? 'flex' : 'none';
+    } catch (e) {
+      // 忽略 DOM 异常
+      console.warn('无法更新分隔线显示:', e);
+    }
   } catch (error) {
     console.error('加载远程书签数量失败:', error);
   }
