@@ -264,6 +264,47 @@ function formatTime(timestamp) {
   return `${year}/${month}/${day} ${hours}:${minutes}:${seconds}`;
 }
 
+// Helper: 统一写入平台级同步状态并更新 UI
+async function setPlatformSyncStatus(platform, status, timestamp = Date.now(), count) {
+  try {
+    if (platform === 'github') {
+      const payload = { githubSyncStatus: status, githubLastSyncTime: timestamp };
+      if (count !== undefined) payload.githubLastSyncCount = count;
+      // 同步通用字段以兼容旧逻辑
+      payload.lastSyncTime = timestamp;
+      payload.syncStatus = status === 'success' ? 'success' : (status === 'error' ? 'error' : 'unknown');
+      if (count !== undefined) payload.lastSyncCount = count;
+      await chrome.storage.local.set(payload);
+    } else {
+      const payload = { giteeSyncStatus: status, giteeLastSyncTime: timestamp };
+      if (count !== undefined) payload.giteeLastSyncCount = count;
+      payload.lastSyncTime = timestamp;
+      payload.syncStatus = status === 'success' ? 'success' : (status === 'error' ? 'error' : 'unknown');
+      if (count !== undefined) payload.lastSyncCount = count;
+      await chrome.storage.local.set(payload);
+    }
+  } catch (e) {
+    console.warn('写入平台同步状态失败:', e);
+  }
+  // 刷新 UI 显示
+  try { await loadSyncStatus(); } catch (e) { /* ignore */ }
+}
+
+// Helper: 清除平台级状态（登出时使用）
+async function clearPlatformSyncStatus(platform) {
+  try {
+    if (platform === 'github') {
+      await chrome.storage.local.remove(['githubSyncStatus', 'githubLastSyncTime', 'githubLastSyncCount']);
+    } else {
+      await chrome.storage.local.remove(['giteeSyncStatus', 'giteeLastSyncTime', 'giteeLastSyncCount']);
+    }
+    // 不影响通用 lastSyncTime/lastSyncCount
+  } catch (e) {
+    console.warn('清除平台同步状态失败:', e);
+  }
+  try { await loadSyncStatus(); } catch (e) { /* ignore */ }
+}
+
 // 处理自动同步开关
 async function handleAutoSyncToggle(event) {
   const enabled = event.target.checked;
@@ -863,6 +904,9 @@ async function handleLogoutPlatform(platform) {
       await chrome.storage.local.remove(['giteeToken', 'giteeGistId', 'giteeRemoteCount', 'giteeUserInfo']);
     }
 
+    // 同时清理平台级同步状态（避免登出后仍显示同步时间/状态）
+    await clearPlatformSyncStatus(platform);
+
     // 更新 UI
     await loadRemoteBookmarkCount();
     await loadUserInfo();
@@ -1021,15 +1065,9 @@ async function handleUpload(platform) {
       await showAlert(`已成功上传 ${localCount} 个书签到 ${platformName}`, '上传成功', 'success');
 
       // 更新显示
-      // 记录平台级别的同步状态和时间
+      // 记录平台级别的同步状态和时间（统一入口）
       const now = Date.now();
-      if (platform === 'github') {
-        await chrome.storage.local.set({ githubSyncStatus: 'success', githubLastSyncTime: now, lastSyncTime: now, syncStatus: 'success', lastSyncCount: localCount, githubLastSyncCount: localCount });
-      } else {
-        await chrome.storage.local.set({ giteeSyncStatus: 'success', giteeLastSyncTime: now, lastSyncTime: now, syncStatus: 'success', lastSyncCount: localCount, giteeLastSyncCount: localCount });
-      }
-
-      await loadSyncStatus();
+      await setPlatformSyncStatus(platform, 'success', now, localCount);
       await fetchRemoteBookmarkCount(platform);
       await checkUnsyncedBookmarks();
     } else {
@@ -1048,15 +1086,10 @@ async function handleUpload(platform) {
       '上传失败',
       'error'
     );
-    // 记录平台错误状态
+    // 记录平台错误状态（统一入口）
     try {
       const now = Date.now();
-      if (platform === 'github') {
-        await chrome.storage.local.set({ githubSyncStatus: 'error', githubLastSyncTime: now });
-      } else {
-        await chrome.storage.local.set({ giteeSyncStatus: 'error', giteeLastSyncTime: now });
-      }
-      await loadSyncStatus();
+      await setPlatformSyncStatus(platform, 'error', now);
     } catch (e) {
       console.warn('记录平台同步错误状态失败:', e);
     }
@@ -1131,17 +1164,12 @@ async function handleDownload(platform) {
       noticeText.textContent = `已成功从 ${platformName} 恢复 ${response.count || 0} 个书签`;
 
       // 更新显示
-      // 记录平台级别的同步状态和时间
+      // 记录平台级别的同步状态和时间（统一入口）
       const now = Date.now();
       const recovered = response.count || 0;
-      if (platform === 'github') {
-        await chrome.storage.local.set({ githubSyncStatus: 'success', githubLastSyncTime: now, lastSyncTime: now, syncStatus: 'success', lastSyncCount: recovered, githubLastSyncCount: recovered });
-      } else {
-        await chrome.storage.local.set({ giteeSyncStatus: 'success', giteeLastSyncTime: now, lastSyncTime: now, syncStatus: 'success', lastSyncCount: recovered, giteeLastSyncCount: recovered });
-      }
+      await setPlatformSyncStatus(platform, 'success', now, recovered);
 
       await loadBookmarkCount();
-      await loadSyncStatus();
       await checkUnsyncedBookmarks();
 
       await showAlert(`已成功从 ${platformName} 恢复 ${response.count || 0} 个书签`, '恢复成功', 'success');
@@ -1157,15 +1185,10 @@ async function handleDownload(platform) {
     noticeText.textContent = errorMsg;
 
     await showAlert(errorMsg, '恢复失败', 'error');
-    // 记录平台错误状态
+    // 记录平台错误状态（统一入口）
     try {
       const now = Date.now();
-      if (platform === 'github') {
-        await chrome.storage.local.set({ githubSyncStatus: 'error', githubLastSyncTime: now });
-      } else {
-        await chrome.storage.local.set({ giteeSyncStatus: 'error', giteeLastSyncTime: now });
-      }
-      await loadSyncStatus();
+      await setPlatformSyncStatus(platform, 'error', now);
     } catch (e) {
       console.warn('记录平台恢复错误状态失败:', e);
     }
