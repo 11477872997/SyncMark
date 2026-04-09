@@ -12,6 +12,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadUserInfo();
   setupEventListeners();
 
+  // 自动刷新远程书签数量（在后台异步执行，不阻塞 UI）
+  refreshRemoteBookmarkCounts();
+
   // 监听书签变化
   chrome.bookmarks.onCreated.addListener(handleBookmarkChange);
   chrome.bookmarks.onRemoved.addListener(handleBookmarkChange);
@@ -154,6 +157,33 @@ async function fetchRemoteBookmarkCount(platform) {
     }
   } catch (error) {
     console.error(`获取${platform}远程书签数量失败:`, error);
+  }
+}
+
+// 刷新所有已配置平台的远程书签数量
+async function refreshRemoteBookmarkCounts() {
+  try {
+    const config = await chrome.storage.local.get([
+      'githubToken',
+      'giteeToken',
+      'githubGistId',
+      'giteeGistId'
+    ]);
+
+    // 并行获取两个平台的远程数量
+    const promises = [];
+
+    if (config.githubToken && config.githubGistId) {
+      promises.push(fetchRemoteBookmarkCount('github'));
+    }
+
+    if (config.giteeToken && config.giteeGistId) {
+      promises.push(fetchRemoteBookmarkCount('gitee'));
+    }
+
+    await Promise.all(promises);
+  } catch (error) {
+    console.error('刷新远程书签数量失败:', error);
   }
 }
 
