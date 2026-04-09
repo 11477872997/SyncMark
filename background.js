@@ -128,7 +128,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'autoSync') {
     console.log('执行自动同步...');
-    performSync().catch(error => {
+    performAutoSync().catch(error => {
       console.error('自动同步失败:', error);
     });
   }
@@ -140,6 +140,63 @@ function setupAutoSync(intervalMinutes) {
     periodInMinutes: intervalMinutes
   });
   console.log(`自动同步已设置，间隔: ${intervalMinutes} 分钟`);
+}
+
+// 智能自动同步：比较本地和远程数量，选择合适的同步方向
+async function performAutoSync() {
+  try {
+    const config = await chrome.storage.local.get([
+      'githubToken',
+      'giteeToken',
+      'githubGistId',
+      'giteeGistId'
+    ]);
+
+    // 获取本地书签数量
+    const bookmarks = await chrome.bookmarks.getTree();
+    const localCount = countBookmarks(bookmarks[0]);
+
+    // 对每个已配置的平台执行智能同步
+    const platforms = [];
+    if (config.githubToken) platforms.push('github');
+    if (config.giteeToken) platforms.push('gitee');
+
+    for (const platform of platforms) {
+      try {
+        const gistId = platform === 'github' ? config.githubGistId : config.giteeGistId;
+
+        if (!gistId) {
+          // 如果没有远程备份，直接上传
+          console.log(`${platform}: 没有远程备份，执行上传`);
+          await performSync(platform);
+          continue;
+        }
+
+        // 获取远程书签数量
+        const remoteCount = await getRemoteBookmarkCount(platform);
+        console.log(`${platform}: 本地 ${localCount} 个，远程 ${remoteCount} 个`);
+
+        // 智能决策：
+        // 1. 如果远程数量 > 本地数量：从远程下载（避免覆盖更多的数据）
+        // 2. 如果本地数量 >= 远程数量：上传到远程
+        if (remoteCount > localCount) {
+          console.log(`${platform}: 远程书签更多，从远程同步到本地`);
+          await restoreFromRemote(platform);
+        } else {
+          console.log(`${platform}: 本地书签更多或相等，上传到远程`);
+          await performSync(platform);
+        }
+      } catch (error) {
+        console.error(`${platform} 自动同步失败:`, error);
+        // 继续处理下一个平台
+      }
+    }
+
+    console.log('自动同步完成');
+  } catch (error) {
+    console.error('自动同步失败:', error);
+    throw error;
+  }
 }
 
 // 执行同步
